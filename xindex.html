@@ -1,0 +1,261 @@
+<!DOCTYPE html>
+<!-- 
+    DOCTYPE: html
+    Declaration that defines this document as an HTML5 document. 
+-->
+<html lang="en">
+<!-- 
+    html: The root element of the HTML page. 
+    lang="en": Attribute specifying the language is English.
+-->
+
+<head>
+    <meta charset="UTF-8">
+    <!-- 
+        meta charset="UTF-8": 
+        Specifies the character encoding for the HTML document. 
+        UTF-8 covers almost all characters and symbols in the world. 
+    -->
+    <title>High-Security Gateway</title>
+    <!-- title: The title shown in the browser tab. -->
+
+    <!-- 
+        script src=... :
+        Links to an external JavaScript library. 
+        Here we are importing 'CryptoJS', a library used for cryptographic operations like encryption and decryption.
+        Datatype of src: String (URL)
+    -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/crypto-js/4.1.1/crypto-js.min.js"></script>
+
+    <style>
+        /* 
+           CSS (Cascading Style Sheets) 
+           This section styles the visual appearance of the HTML elements.
+        */
+
+        body {
+            /* Font family determines the text style. */
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            /* Flexbox layout to center content horizontally and vertically. */
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            /* Height of the viewport (screen). 100vh = 100% of view height. */
+            height: 100vh;
+            /* Dark background color (#1a1a1a is a hex color code). */
+            background: #1a1a1a;
+            color: white;
+            /* Text color */
+        }
+
+        .container {
+            /* Styles for the main box containing the form */
+            background: #2d2d2d;
+            padding: 30px;
+            /* Space inside the box */
+            border-radius: 12px;
+            /* Rounded corners */
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+            /* Drop shadow: horizontal-offset vertical-offset blur-radius color */
+            width: 350px;
+            text-align: center;
+            /* Center text inside the box */
+        }
+
+        input {
+            /* Styling for the input fields */
+            width: 90%;
+            padding: 12px;
+            margin: 10px 0;
+            /* Vertical spacing: 10px top/bottom, 0 left/right */
+            border: 1px solid #444;
+            border-radius: 6px;
+            background: #3d3d3d;
+            color: white;
+        }
+
+        button {
+            /* Styling for the button */
+            width: 100%;
+            padding: 12px;
+            background: #28a745;
+            /* Green color */
+            border: none;
+            color: white;
+            border-radius: 6px;
+            cursor: pointer;
+            /* Change cursor to pointer (hand) on hover */
+            font-weight: bold;
+        }
+
+        button:hover {
+            /* Style applied when mouse hovers over the button */
+            background: #218838;
+            /* Darker green */
+        }
+
+        #status {
+            /* Styling for the status message area */
+            color: #ff6b6b;
+            /* Reddish color for potential error messages */
+            margin-top: 15px;
+            font-size: 0.9rem;
+        }
+    </style>
+</head>
+
+<body>
+
+    <!-- 
+    div class="container": 
+    A division element acting as a container for our form. 
+    It leverages the '.container' styles defined in the CSS above.
+-->
+    <div class="container">
+        <h2>Secure Access</h2>
+
+        <!-- 
+        input type="password":
+        An input field where characters are masked (shown as dots) for security.
+        id="key1": A unique identifier used to grab this element in JavaScript.
+        placeholder: Text shown when the field is empty.
+    -->
+        <input type="password" id="key1" placeholder="Primary Passkey">
+        <input type="password" id="key2" placeholder="Secondary Passkey">
+
+        <!-- 
+        button onclick="unlock()": 
+        A clickable button. When clicked, it runs the JavaScript function named 'unlock'.
+    -->
+        <button onclick="unlock()">ACCESS SYSTEM</button>
+
+        <!-- div id="status": specific area to display success or error messages to the user. -->
+        <div id="status"></div>
+    </div>
+
+    <script>
+        /**
+         * EXTENSIVE CODE COMMENTS FOR NOVICE UNDERSTANDING
+         * ================================================
+         * Below is the logic that powers the security gateway.
+         */
+
+        // CONSTANTS
+        // 'const' declares a variable that cannot be reassigned.
+        // Datatype: String (Sequence of characters)
+        // HEX_A represents the encrypted version of the 'Internal Key', stored as a hex string.
+        const HEX_A = "553246736447566b583138496d4d4a30765354575065662b364e496a37306c4b4777344b737a4e714c61597455674d4d6e334e776d533548526e364a516d5452"; // Important: This needs to be a real encrypted string in a real app.
+
+        // Datatype: String
+        // HEX_B represents the encrypted version of the final URL we want to access.
+        const HEX_B = "553246736447566b583139746167645761387473743141386c316d664961772f5a536c69557831617065374b5453625a7373314b49567145334c4a4d71794c656e566e452f46366b766d38797a62302f476b38395471675944636a475456595854726357306638784b6f5166507472545449384f2f4a6b58544676396e6d7664335642375656666c62584b576a6e6266594367516f737064676b6359377679555858723276616d336d64664c3853506872537939364e48516a4534422b4f626b635165544f6e787570514e4b7350546f6f754f7568513d3d";
+
+        /**
+         * Function: unlock
+         * Purpose: Triggered when the user clicks the "ACCESS SYSTEM" button.
+         * It attempts to decrypt the hidden URL using the passwords provided.
+         */
+        function unlock() {
+            // STEP 1: RETRIEVE USER INPUT
+            // document.getElementById('key1') finds the HTML element with id="key1".
+            // .value accesses the property holding the text currently inside that input field.
+            // Datatype: String
+            const pass1 = document.getElementById('key1').value;
+            const pass2 = document.getElementById('key2').value;
+
+            // Get reference to the status display element so we can update its text later.
+            // Datatype: HTMLDivElement (Object representing the <div> element)
+            const status = document.getElementById('status');
+
+            try {
+                // The try...catch block is used to handle runtime errors gracefully. 
+                // If anything goes wrong inside the 'try' block, the code jumps to 'catch'.
+
+                // --- STAGE 1: Decrypting the 'Internal Key' ---
+
+                // 1. Convert the HEX string back to the original OpenSSL-format string
+                // Datatype: String (the Base64 string starting with "Salted__...")
+                const encryptedA = CryptoJS.enc.Hex.parse(HEX_A).toString(CryptoJS.enc.Utf8);
+
+                // 2. Decrypt using the password
+                // Datatype: WordArray
+                const stage1Bytes = CryptoJS.AES.decrypt(encryptedA, pass1);
+
+                // Convert the decrypted binary data back into a readable UTF-8 string.
+                // If the password was wrong, this will likely result in an empty string or garbage characters.
+                // Datatype: String
+                const internalKey = stage1Bytes.toString(CryptoJS.enc.Utf8);
+
+                // DEBUG: Check Stage 1
+                if (!internalKey) {
+                    alert("DEBUG ERROR: Stage 1 Failed.\nEither 'Primary Passkey' is wrong OR HEX_A logic is invalid.");
+                    return;
+                }
+
+                // --- STAGE 2: Decrypting the 'Encrypted URL' ---
+
+                // 1. Convert HEX_B back to OpenSSL-format string
+                const encryptedB = CryptoJS.enc.Hex.parse(HEX_B).toString(CryptoJS.enc.Utf8);
+
+                // 2. Decrypt using the secondary password
+                // Datatype: WordArray
+                const stage2Bytes = CryptoJS.AES.decrypt(encryptedB, pass2);
+
+                // Convert the stage 2 binary data to string.
+                // Datatype: String
+                const encryptedUrl = stage2Bytes.toString(CryptoJS.enc.Utf8);
+
+                // DEBUG: Check Stage 2
+                if (!encryptedUrl) {
+                    alert("DEBUG ERROR: Stage 2 Failed.\nEither 'Secondary Passkey' is wrong OR HEX_B logic is invalid.");
+                    return;
+                }
+
+                // --- FINAL STAGE: Decrypting the Final URL ---
+
+                // Now we use the 'internalKey' (retrieved in Stage 1) to decrypt the 
+                // 'encryptedUrl' (retrieved in Stage 2).
+                // This is a "chained" encryption: you need both correct keys to solve it.
+                // Datatype: WordArray
+                const finalBytes = CryptoJS.AES.decrypt(encryptedUrl, internalKey);
+
+                // Convert to string to get the actual URL.
+                // Datatype: String
+                const finalUrl = finalBytes.toString(CryptoJS.enc.Utf8);
+
+                if (!finalUrl) {
+                    alert("DEBUG ERROR: Final Stage Failed.\nInternal Key could not decrypt the URL.");
+                    return;
+                }
+
+                alert("The decrypted URL is: " + finalUrl);
+
+                // --- VALIDATION AND REDIRECT ---
+
+                // Check if the result looks like a valid URL (e.g., starts with "http" or "https").
+                // finalUrl.startsWith(...) checks the beginning of the string.
+                // Datatype: Boolean (true or false)
+                if (finalUrl.startsWith('http')) {
+                    // SUCCESS CASE
+                    status.style.color = "#28a745"; // Change text color to green.
+                    status.innerText = "Access Granted. Redirecting..."; // Update user-visible text.
+
+                    // Redirect the browser window to the decrypted URL.
+                    window.location.href = finalUrl;
+                } else {
+                    // FAILURE CASE (Decryption produced garbage data because passwords were wrong)
+                    status.innerText = "Validation Failed: Decrypted text is not a valid URL.";
+                }
+
+            } catch (e) {
+                // ERROR HANDLING
+                // This block runs if an error occurs (e.g., parsing invalid data).
+                // 'e' is the Error object containing details about what went wrong.
+                status.innerText = "Critical Error: Decryption sequence broken.";
+                // Ideally, we might log 'e' to the console for debugging: console.error(e);
+            }
+        }
+    </script>
+</body>
+
+</html>
