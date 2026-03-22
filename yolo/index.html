@@ -1,0 +1,324 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>YOLO Interactive Hybrid</title>
+    <style>
+        :root {
+            --primary: #10b981;
+            --secondary: #3b82f6;
+            --bg: #0f172a;
+            --text: #f8fafc;
+        }
+
+        body {
+            margin: 0;
+            padding: 20px;
+            background: var(--bg);
+            color: var(--text);
+            font-family: 'Inter', sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            min-height: 100vh;
+        }
+
+        .container {
+            max-width: 640px;
+            width: 100%;
+            background: rgba(30, 41, 59, 0.7);
+            backdrop-filter: blur(10px);
+            padding: 2rem;
+            border-radius: 1.5rem;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+        }
+
+        h1 {
+            margin-top: 0;
+            background: linear-gradient(to right, var(--primary), var(--secondary));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            font-size: 1.8rem;
+            text-align: center;
+        }
+
+        .controls {
+            display: flex;
+            flex-direction: column;
+            gap: 1rem;
+            margin-bottom: 1.5rem;
+        }
+
+        input {
+            background: #020617;
+            border: 1px solid #334155;
+            color: white;
+            padding: 0.75rem 1rem;
+            border-radius: 0.5rem;
+            font-size: 0.9rem;
+            outline: none;
+            transition: border-color 0.2s;
+        }
+
+        input:focus {
+            border-color: var(--primary);
+        }
+
+        button {
+            background: linear-gradient(45deg, var(--primary), var(--secondary));
+            border: none;
+            color: white;
+            padding: 1rem;
+            border-radius: 0.5rem;
+            font-weight: 700;
+            cursor: pointer;
+            transition: transform 0.1s, opacity 0.2s;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+
+        button:hover {
+            opacity: 0.9;
+        }
+
+        button:active {
+            transform: scale(0.98);
+        }
+
+        .video-container {
+            position: relative;
+            width: 100%;
+            aspect-ratio: 4/3;
+            background: #020617;
+            border-radius: 1rem;
+            overflow: hidden;
+            border: 1px solid #334155;
+        }
+
+        /* The live video stream */
+        video {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            /* Do not mirror video because coordinates from YOLO won't match unless we map them. For simplicity, we keep it normal. */
+        }
+
+        /* The canvas that draws the bounding boxes */
+        #overlayCanvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            /* Let clicks pass through */
+        }
+
+        #stats {
+            margin-top: 1rem;
+            font-size: 0.8rem;
+            text-align: center;
+            color: #94a3b8;
+            display: flex;
+            justify-content: space-between;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <h1>INTERACTIVE OVERLAY</h1>
+        <div class="controls">
+            <input type="text" id="wsUrl" placeholder="wss://your-id.ngrok-free.app" autocomplete="off">
+            <button id="startBtn">Start Interactive Hybrid</button>
+        </div>
+
+        <div class="video-container">
+            <video id="webcam" autoplay playsinline muted></video>
+            <!-- Canvas resolution dynamically adjusted to match video frame -->
+            <canvas id="overlayCanvas"></canvas>
+        </div>
+
+        <div id="stats">
+            <div><span id="statusText">Disconnected</span></div>
+            <div id="latencyCounter">Delay: 0ms</div>
+        </div>
+    </div>
+
+    <script>
+        const wsUrlInput = document.getElementById('wsUrl');
+        const startBtn = document.getElementById('startBtn');
+        const video = document.getElementById('webcam');
+        const overlayCanvas = document.getElementById('overlayCanvas');
+        const overlayCtx = overlayCanvas.getContext('2d');
+        const statusText = document.getElementById('statusText');
+        const latencyCounter = document.getElementById('latencyCounter');
+
+        let ws = null;
+        let stream = null;
+        let isStreaming = false;
+
+        // Critical Lockstep Variable
+        let isWaitingForServer = false;
+        let lastFrameSentAt = 0;
+
+        // Offscreen canvas for JPEG compression
+        const sendCanvas = document.createElement('canvas');
+        sendCanvas.width = 640;
+        sendCanvas.height = 480;
+        const sendCtx = sendCanvas.getContext('2d');
+
+        async function initCamera() {
+            try {
+                stream = await navigator.mediaDevices.getUserMedia({
+                    video: {
+                        width: { ideal: 640 },
+                        height: { ideal: 480 },
+                        facingMode: "environment"
+                    }
+                });
+                video.srcObject = stream;
+
+                // When video metadata loads, match overlay canvas internal resolution
+                video.onloadedmetadata = () => {
+                    overlayCanvas.width = video.videoWidth;
+                    overlayCanvas.height = video.videoHeight;
+                };
+                return true;
+            } catch (err) {
+                console.error("Camera access failed:", err);
+                alert("Could not access camera.");
+                return false;
+            }
+        }
+
+        function drawDetections(detections) {
+            // Clear previous boxes
+            overlayCtx.clearRect(0, 0, overlayCanvas.width, overlayCanvas.height);
+
+            // The YOLO coordinates are relative to the 640x480 offscreen capture canvas
+            // We must scale them to match the actual video stream's intrinsic resolution
+            const scaleX = overlayCanvas.width / 640;
+            const scaleY = overlayCanvas.height / 480;
+
+            overlayCtx.lineWidth = 3;
+            overlayCtx.font = "18px Inter";
+
+            detections.forEach(det => {
+                const [x1, y1, x2, y2] = det.box;
+                const conf = Math.round(det.confidence * 100);
+                const label = `${det.class} ${conf}%`;
+
+                // Scale coordinates
+                const sx = x1 * scaleX;
+                const sy = y1 * scaleY;
+                const width = (x2 - x1) * scaleX;
+                const height = (y2 - y1) * scaleY;
+
+                // Select a color based on string length (simple pseudo-randomish color that is stable per class)
+                const hue = (det.class.length * 45) % 360;
+                const color = `hsl(${hue}, 80%, 50%)`;
+
+                // Draw Box
+                overlayCtx.strokeStyle = color;
+                overlayCtx.strokeRect(sx, sy, width, height);
+
+                // Draw Badge Background
+                overlayCtx.fillStyle = color;
+                const textWidth = overlayCtx.measureText(label).width;
+                overlayCtx.fillRect(sx, sy - 25, textWidth + 10, 25);
+
+                // Draw Text
+                overlayCtx.fillStyle = 'white';
+                overlayCtx.fillText(label, sx + 5, sy - 6);
+            });
+        }
+
+        function startInteractiveHybrid() {
+            let url = wsUrlInput.value.trim();
+            if (!url) return;
+
+            // Target the JSON /api endpoint
+            if (url.endsWith('/')) url = url.slice(0, -1);
+            if (!url.endsWith('/ws/api')) {
+                if (url.endsWith('/ws')) url = url.slice(0, -3);
+                if (url.endsWith('/ws/source') || url.endsWith('/ws/viewer')) url = url.slice(0, -10);
+                url = url + '/ws/api';
+            }
+
+            ws = new WebSocket(url);
+            // No arraybuffer needed! We receive lightweight JSON strings
+
+            ws.onopen = () => {
+                statusText.innerText = 'Connected & Mapping';
+                isStreaming = true;
+                isWaitingForServer = false;
+                requestAnimationFrame(lockstepLoop);
+            };
+
+            ws.onclose = () => {
+                statusText.innerText = 'Disconnected';
+                isStreaming = false;
+            };
+
+            ws.onmessage = (event) => {
+                // Calculate latency
+                const latency = Date.now() - lastFrameSentAt;
+                latencyCounter.innerText = `JSON Delay: ${latency}ms`;
+
+                // Parse coordinates
+                const json = JSON.parse(event.data);
+                if (json.detections) {
+                    drawDetections(json.detections);
+                }
+
+                // CRITICAL: Unlock the lockstep loop to send the next frame
+                isWaitingForServer = false;
+            };
+        }
+
+        function lockstepLoop() {
+            if (!isStreaming || ws.readyState !== WebSocket.OPEN) return;
+
+            // Only send the NEXT frame if the server has finished the PREVIOUS frame
+            if (!isWaitingForServer) {
+                // Take a snapshot of the live, high FPS video
+                sendCtx.drawImage(video, 0, 0, sendCanvas.width, sendCanvas.height);
+
+                sendCanvas.toBlob((blob) => {
+                    if (blob && ws.readyState === WebSocket.OPEN) {
+                        lastFrameSentAt = Date.now();
+                        ws.send(blob);
+                        isWaitingForServer = true; // Lock until JSON returns
+                    }
+                }, 'image/jpeg', 0.6); // Still use aggressive downsampling for uplink
+            }
+
+            requestAnimationFrame(lockstepLoop); // Keep looping at 60Hz, but only send if unlocked
+        }
+
+        startBtn.addEventListener('click', async () => {
+            if (!stream) {
+                const ok = await initCamera();
+                if (!ok) return;
+            }
+
+            if (!isStreaming) {
+                startInteractiveHybrid();
+                startBtn.innerText = "Stop Hybrid";
+                startBtn.style.background = "linear-gradient(45deg, #ef4444, #f87171)";
+            } else {
+                if (ws) ws.close();
+                isStreaming = false;
+                startBtn.innerText = "Start Interactive Hybrid";
+                startBtn.style.background = "linear-gradient(45deg, var(--primary), var(--secondary))";
+                overlayCtx.clearRect(0, 0, overlayCanvas.width, overlayCanvas.height); // clear screen
+            }
+        });
+    </script>
+</body>
+
+</html>
